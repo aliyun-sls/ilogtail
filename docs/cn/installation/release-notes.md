@@ -1,5 +1,101 @@
 # 发布记录
 
+## 1.5.0
+
+### 发布记录
+
+发版日期：2023 年 5 月 1 日
+
+新功能
+
+* 新增插件Extension机制 [#648](https://github.com/alibaba/ilogtail/pull/648)
+* flusher\_http插件通过Extension机制支持自定义鉴权、过滤、熔断 [#648](https://github.com/alibaba/ilogtail/pull/648)
+* 新增Fusher插件: flusher\_loki [#259](https://github.com/alibaba/ilogtail/issues/259)
+* 新增Processor插件: processor\_string\_replace [#757](https://github.com/alibaba/ilogtail/pull/757)
+* 支持在C++加速模式下通过文件为数据自动添加Tag [#812](https://github.com/alibaba/ilogtail/issues/812)
+* 为SLS Data Server Endpoint添加受控的切换策略 [#802](https://github.com/alibaba/ilogtail/issues/802)
+* 支持iLogtail通过网络代理管控和发送数据 [#806](https://github.com/alibaba/ilogtail/issues/806)
+* 添加Windows编译脚本支持编译x86和x86-64版本 [#327](https://github.com/alibaba/ilogtail/issues/327)
+* Profiling功能支持goprofile拉取模式 [#730](https://github.com/alibaba/ilogtail/issues/730)
+* V2流水线完整支持OTLP Log模型 [#779](https://github.com/alibaba/ilogtail/issues/779)
+
+优化
+
+* 默认打开enable\_env\_ref\_in\_config选项以支持配置中环境变量替换 [#744](https://github.com/alibaba/ilogtail/issues/744)
+* processor\_split\_key\_value插件性能优化并增加多字符引用符 [#762](https://github.com/alibaba/ilogtail/issues/762)
+
+问题修复
+
+* 修复使用flusher\_kafka\_v2/flusher\_pulsar插件时，TagFieldsRename选项中部分Tag字段无法被重命名的问题 [#744](https://github.com/alibaba/ilogtail/issues/744)
+* 修复创建query模式的logstore时，无法自动创建索引的问题 [#798](https://github.com/alibaba/ilogtail/issues/798)
+* 修复processor\_filter\_key有多个key时即使匹配也过滤日志的问题 [#816](https://github.com/alibaba/ilogtail/issues/816)
+
+[详情和源代码](https://github.com/alibaba/ilogtail/blob/main/changes/v1.5.0.md)
+
+### 下载
+
+| 文件名                                                                                                                                          | 系统    | 架构     | SHA256 校验码                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------- |
+| [ilogtail-1.5.0.linux-amd64.tar.gz](https://ilogtail-community-edition.oss-cn-shanghai.aliyuncs.com/1.5.0/ilogtail-1.5.0.linux-amd64.tar.gz) | Linux | x86-64 | ccb7e637bc7edc4e9fe22ab3ac79cedee63d80678711e0efc77122387ec73882 |
+| [ilogtail-1.5.0.linux-arm64.tar.gz](https://ilogtail-community-edition.oss-cn-shanghai.aliyuncs.com/1.5.0/ilogtail-1.5.0.linux-arm64.tar.gz) | Linux | arm64  | f1d7940e08ee51f2c66d963d91c16903658ab1e0fc856002351248c94d0e6b0a |
+| [ilogtail-1.5.0.windows-amd64.zip](https://ilogtail-community-edition.oss-cn-shanghai.aliyuncs.com/1.5.0/ilogtail-1.5.0.windows-amd64.zip)   | Windows | x86-64 | 7b3ccbfcca18e1ffeb2e5db06b32fbcac3e8b7ecf8113a7006891bbe3c1a5a84 |
+
+### Docker 镜像
+
+**Docker Pull 命令**&#x20;
+
+``` bash
+docker pull sls-opensource-registry.cn-shanghai.cr.aliyuncs.com/ilogtail-community-edition/ilogtail:1.5.0
+```
+
+## 1.4.0
+
+### 发布记录
+
+发版日期：2023 年 3 月 21 日
+
+新功能
+
+* 新增Pulsar输出插件flusher\_pulsar [#540](https://github.com/alibaba/ilogtail/issues/540)
+* 新增ClickHouse输出插件flusher\_clickhouse [#112](https://github.com/alibaba/ilogtail/issues/112)
+* 新增Elasticsearch输出插件flusher\_elasticsearch [#202](https://github.com/alibaba/ilogtail/issues/202)
+* 新增Open Telemetry输入插件service\_otlp [#637](https://github.com/alibaba/ilogtail/issues/637)
+* 新增使用plugins.yml裁剪插件和external\_plugins.yml引入外部插件库 [#625](https://github.com/alibaba/ilogtail/issues/625)
+* 新增云主机实例元信息处理插件processor\_cloud\_meta [#692](https://github.com/alibaba/ilogtail/pull/692)
+* 更新Open Telemetry输出插件新增Metric/Trace支持，同时重命名为flusher\_otlp [#646](https://github.com/alibaba/ilogtail/pull/646)
+* 更新HTTP输入服务新增Pyroscope协议支持 [#653](https://github.com/alibaba/ilogtail/issues/653)
+
+优化
+
+* 更新Kafka V2 flusher支持TLS和Kerberos认证 [#601](https://github.com/alibaba/ilogtail/issues/601)
+* 更新HTTP输出支持添加动态Header [#643](https://github.com/alibaba/ilogtail/pull/643)
+* 更新通过ENV配置SLS Config新增冷存等Logstore参数支持 [#687](https://github.com/alibaba/ilogtail/issues/687)
+
+问题修复
+
+* 修复时区相关问题，使用系统时间和解析日志时间失败时忽略时区调整选项 [#550](https://github.com/alibaba/ilogtail/issues/550)
+* 修复因inode复用导致的日志重复采集问题 [#597](https://github.com/alibaba/ilogtail/issues/597)
+* 修复Prometheus输入插件自动切换到streaming模式卡死的问题 [#684](https://github.com/alibaba/ilogtail/pull/684)
+* 修复Grok插件解析中文会可能卡死的问题 [#644](https://github.com/alibaba/ilogtail/issues/644)
+* 修复1.2.1版本中引入的容器发现内存使用过高的问题 [#661](https://github.com/alibaba/ilogtail/issues/661)
+
+[详情和源代码](https://github.com/alibaba/ilogtail/blob/main/changes/v1.4.0.md)
+
+### 下载
+
+| 文件名                                                                                                                                          | 系统    | 架构     | SHA256 校验码                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------- |
+| [ilogtail-1.4.0.linux-amd64.tar.gz](https://ilogtail-community-edition.oss-cn-shanghai.aliyuncs.com/1.4.0/ilogtail-1.4.0.linux-amd64.tar.gz) | Linux | x86-64 | d48fc6e8c76f117651487a33648ab6de0e2d8dd24ae399d9a7f534b81d639a61 |
+| [ilogtail-1.4.0.linux-arm64.tar.gz](https://ilogtail-community-edition.oss-cn-shanghai.aliyuncs.com/1.4.0/ilogtail-1.4.0.linux-arm64.tar.gz) | Linux | arm64  | 1d488d0905e0fb89678e256c980e491e9c1c0d3ef579ecbbc18360afdcc1a853 |
+
+### Docker 镜像
+
+**Docker Pull 命令**&#x20;
+
+```
+docker pull sls-opensource-registry.cn-shanghai.cr.aliyuncs.com/ilogtail-community-edition/ilogtail:1.4.0
+```
+
 ## 1.3.1
 
 ### 发布记录

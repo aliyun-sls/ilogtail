@@ -23,10 +23,11 @@ import (
 
 	aliyunlog "github.com/aliyun/aliyun-log-go-sdk"
 
-	k8s_event "github.com/alibaba/ilogtail/helper/eventrecorder"
 	"github.com/alibaba/ilogtail/pkg/flags"
+	k8s_event "github.com/alibaba/ilogtail/pkg/helper/eventrecorder"
 	"github.com/alibaba/ilogtail/pkg/logger"
 	"github.com/alibaba/ilogtail/pkg/util"
+	"github.com/alibaba/ilogtail/pluginmanager"
 )
 
 // nolint:unused
@@ -43,12 +44,13 @@ type operationWrapper struct {
 	configCacheMap   map[string]time.Time
 }
 
-func createDefaultK8SIndex() *aliyunlog.Index {
+func createDefaultK8SIndex(logstoremode string) *aliyunlog.Index {
+	docvalue := logstoremode == StandardMode
 	normalIndexKey := aliyunlog.IndexKey{
 		Token:         []string{" ", "\n", "\t", "\r", ",", ";", "[", "]", "{", "}", "(", ")", "&", "^", "*", "#", "@", "~", "=", "<", ">", "/", "\\", "?", ":", "'", "\""},
 		CaseSensitive: false,
 		Type:          "text",
-		DocValue:      true,
+		DocValue:      docvalue,
 	}
 	return &aliyunlog.Index{
 		Line: &aliyunlog.IndexLine{
@@ -94,6 +96,7 @@ func createAliyunLogOperationWrapper(endpoint, project, accessKeyID, accessKeySe
 	} else {
 		clientInterface = aliyunlog.CreateNormalInterface(endpoint, accessKeyID, accessKeySecret, stsToken)
 	}
+	clientInterface.SetUserAgent(pluginmanager.UserAgent)
 	wrapper := &operationWrapper{
 		logClient: clientInterface,
 		project:   project,
@@ -170,9 +173,9 @@ func (o *operationWrapper) removeConfigCache(project, config string) {
 }
 
 // nolint:unused
-func (o *operationWrapper) retryCreateIndex(project, logstore string) {
+func (o *operationWrapper) retryCreateIndex(project, logstore, logstoremode string) {
 	time.Sleep(time.Second * 10)
-	index := createDefaultK8SIndex()
+	index := createDefaultK8SIndex(logstoremode)
 	// create index, create index do not return error
 	for i := 0; i < 10; i++ {
 		err := o.logClient.CreateIndex(project, logstore, *index)
@@ -188,9 +191,9 @@ func (o *operationWrapper) retryCreateIndex(project, logstore string) {
 	}
 }
 
-func (o *operationWrapper) createProductLogstore(config *AliyunLogConfigSpec, project, logstore, product, lang string) error {
+func (o *operationWrapper) createProductLogstore(config *AliyunLogConfigSpec, project, logstore, product, lang string, hotTTL int) error {
 	logger.Info(context.Background(), "begin to create product logstore, project", project, "logstore", logstore, "product", product, "lang", lang)
-	err := CreateProductLogstore(*flags.DefaultRegion, project, logstore, product, lang)
+	err := CreateProductLogstore(*flags.DefaultRegion, project, logstore, product, lang, hotTTL)
 
 	annotations := GetAnnotationByObject(config, project, logstore, product, config.LogtailConfig.ConfigName, false)
 
@@ -209,7 +212,34 @@ func (o *operationWrapper) createProductLogstore(config *AliyunLogConfigSpec, pr
 	return nil
 }
 
-func (o *operationWrapper) makesureLogstoreExist(config *AliyunLogConfigSpec, project, logstore string, shardCount, lifeCycle int, product, lang, mode string) error {
+func (o *operationWrapper) makesureLogstoreExist(config *AliyunLogConfigSpec) error {
+	project := o.project
+	if len(config.Project) != 0 {
+		project = config.Project
+	}
+	logstore := config.Logstore
+	shardCount := 0
+	if config.ShardCount != nil {
+		shardCount = int(*config.ShardCount)
+	}
+	lifeCycle := 0
+	if config.LifeCycle != nil {
+		lifeCycle = int(*config.LifeCycle)
+	}
+	mode := StandardMode
+	if len(config.LogstoreMode) != 0 {
+		if config.LogstoreMode == QueryMode {
+			mode = QueryMode
+		}
+	}
+
+	product := config.ProductCode
+	lang := config.ProductLang
+	hotTTL := 0
+	if config.LogstoreHotTTL != nil {
+		hotTTL = int(*config.LogstoreHotTTL)
+	}
+
 	if o.logstoreCacheExists(project, logstore) {
 		return nil
 	}
@@ -218,12 +248,12 @@ func (o *operationWrapper) makesureLogstoreExist(config *AliyunLogConfigSpec, pr
 		if len(lang) == 0 {
 			lang = "cn"
 		}
-		return o.createProductLogstore(config, project, logstore, product, lang)
+		return o.createProductLogstore(config, project, logstore, product, lang, hotTTL)
 	}
 
 	// @note hardcode for k8s audit, eg audit-cfc281c9c4ca548638a1aaa765d8f220d
 	if strings.HasPrefix(logstore, "audit-") && len(logstore) == 39 {
-		return o.createProductLogstore(config, project, logstore, "k8s-audit", "cn")
+		return o.createProductLogstore(config, project, logstore, "k8s-audit", "cn", 0)
 	}
 
 	if project != o.project {
@@ -264,6 +294,31 @@ func (o *operationWrapper) makesureLogstoreExist(config *AliyunLogConfigSpec, pr
 		MaxSplitShard: 32,
 		Mode:          mode,
 	}
+	if config.LogstoreHotTTL != nil {
+		logStore.HotTTL = uint32(*config.LogstoreHotTTL)
+	}
+
+	if len(config.LogstoreTelemetryType) > 0 {
+		if MetricsTelemetryType == config.LogstoreTelemetryType {
+			logStore.TelemetryType = config.LogstoreTelemetryType
+		}
+	}
+	if config.LogstoreAppendMeta {
+		logStore.AppendMeta = config.LogstoreAppendMeta
+	}
+	if config.LogstoreEnableTracking {
+		logStore.WebTracking = config.LogstoreEnableTracking
+	}
+	if config.LogstoreAutoSplit {
+		logStore.AutoSplit = config.LogstoreAutoSplit
+	}
+	if config.LogstoreMaxSplitShard != nil {
+		logStore.MaxSplitShard = int(*config.LogstoreMaxSplitShard)
+	}
+	if config.LogstoreEncryptConf.Enable {
+		logStore.EncryptConf = &config.LogstoreEncryptConf
+	}
+
 	for i := 0; i < *flags.LogOperationMaxRetryTimes; i++ {
 		err = o.logClient.CreateLogStoreV2(project, logStore)
 		if err != nil {
@@ -288,7 +343,7 @@ func (o *operationWrapper) makesureLogstoreExist(config *AliyunLogConfigSpec, pr
 	// after create logstore success, wait 1 sec
 	time.Sleep(time.Second)
 	// use default k8s index
-	index := createDefaultK8SIndex()
+	index := createDefaultK8SIndex(mode)
 	// create index, create index do not return error
 	for i := 0; i < *flags.LogOperationMaxRetryTimes; i++ {
 		err = o.logClient.CreateIndex(project, logstore, *index)
@@ -434,21 +489,7 @@ func (o *operationWrapper) updateConfigInner(config *AliyunLogConfigSpec) error 
 		project = config.Project
 	}
 	logstore := config.Logstore
-	shardCount := 0
-	if config.ShardCount != nil {
-		shardCount = int(*config.ShardCount)
-	}
-	lifeCycle := 0
-	if config.LifeCycle != nil {
-		lifeCycle = int(*config.LifeCycle)
-	}
-	mode := StandardMode
-	if len(config.LogstoreMode) != 0 {
-		if config.LogstoreMode == QueryMode {
-			mode = QueryMode
-		}
-	}
-	err := o.makesureLogstoreExist(config, project, logstore, shardCount, lifeCycle, config.ProductCode, config.ProductLang, mode)
+	err := o.makesureLogstoreExist(config)
 	if err != nil {
 		return fmt.Errorf("Create logconfig error when update config, config : %s, error : %s", config.LogtailConfig.ConfigName, err.Error())
 	}

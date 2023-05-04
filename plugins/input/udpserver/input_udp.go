@@ -15,34 +15,46 @@
 package udpserver
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
-	"github.com/alibaba/ilogtail"
-	"github.com/alibaba/ilogtail/helper/decoder"
 	"github.com/alibaba/ilogtail/pkg/logger"
+	"github.com/alibaba/ilogtail/pkg/pipeline"
+	"github.com/alibaba/ilogtail/pkg/pipeline/extensions"
 	"github.com/alibaba/ilogtail/pkg/protocol"
 )
 
 type UDPServer struct {
+	Decoder       string
 	Format        string
 	Address       string
 	MaxBufferSize int
 
-	context   ilogtail.Context
-	decoder   decoder.Decoder
+	context   pipeline.Context
+	decoder   extensions.Decoder
 	addr      *net.UDPAddr
 	conn      *net.UDPConn
-	collector ilogtail.Collector
+	collector pipeline.Collector
 }
 
-func (u *UDPServer) Init(context ilogtail.Context) (int, error) {
+func (u *UDPServer) Init(context pipeline.Context) (int, error) {
 	u.context = context
-	var err error
-	if u.decoder, err = decoder.GetDecoder(u.Format); err != nil {
+	options := &struct {
+		Format string
+	}{
+		Format: u.Format,
+	}
+	ext, err := context.GetExtension(u.Decoder, options)
+	if err != nil {
 		return 0, err
 	}
+	decoder, ok := ext.(extensions.Decoder)
+	if !ok {
+		return 0, fmt.Errorf("extension %s with type %T not implement extensions.Decoder", u.Decoder, ext)
+	}
+	u.decoder = decoder
 
 	host, portStr, err := net.SplitHostPort(u.Address)
 	if err != nil {
@@ -76,7 +88,7 @@ func (u *UDPServer) Description() string {
 	return "this is an udp listening server"
 }
 
-func (u *UDPServer) Start(collector ilogtail.Collector) error {
+func (u *UDPServer) Start(collector pipeline.Collector) error {
 	u.collector = collector
 	err := u.doStart(u.dispatcher)
 	logger.Infof(u.context.GetRuntimeContext(), "start udp server, status", err == nil)
@@ -106,7 +118,7 @@ func (u *UDPServer) doStart(dispatchFunc func(logs []*protocol.Log)) error {
 				logger.Error(u.context.GetRuntimeContext(), "UDP_SERVER_ALARM", "read record err", err)
 				return
 			}
-			logs, err := u.decoder.Decode(buf[:n], nil)
+			logs, err := u.decoder.Decode(buf[:n], nil, nil)
 			if err != nil {
 				logger.Error(u.context.GetRuntimeContext(), "UDP_SERVER_ALARM", "decode record err,some logs would be dropped", err)
 			} else {
@@ -131,9 +143,10 @@ func (u *UDPServer) dispatcher(logs []*protocol.Log) {
 }
 
 func init() {
-	ilogtail.ServiceInputs["service_udp_server"] = func() ilogtail.ServiceInput {
+	pipeline.ServiceInputs["service_udp_server"] = func() pipeline.ServiceInput {
 		return &UDPServer{
 			MaxBufferSize: 65535,
+			Decoder:       "ext_default_decoder",
 		}
 	}
 }

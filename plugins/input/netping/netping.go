@@ -28,9 +28,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alibaba/ilogtail"
-	"github.com/alibaba/ilogtail/helper"
+	"github.com/alibaba/ilogtail/pkg/helper"
 	"github.com/alibaba/ilogtail/pkg/logger"
+	"github.com/alibaba/ilogtail/pkg/pipeline"
 	"github.com/alibaba/ilogtail/pkg/util"
 
 	goping "github.com/go-ping/ping"
@@ -107,21 +107,23 @@ type HTTPConfig struct {
 
 // NetPing struct implements the MetricInput interface.
 type NetPing struct {
-	timeout         time.Duration
-	icmpPrivileged  bool
-	hasConfig       bool
-	resultChannel   chan *Result
-	context         ilogtail.Context
-	hostname        string
-	ip              string
-	resolveHostMap  *sync.Map
-	resolveChannel  chan *ResolveResult
-	DisableDNS      bool         `json:"disable_dns_metric" comment:"disable dns resolve metric, default is false"`
-	TimeoutSeconds  int          `json:"timeout_seconds" comment:"the timeout of ping/tcping, unit is second,must large than or equal 1, less than  30, default is 5"`
-	IntervalSeconds int          `json:"interval_seconds" comment:"the interval of ping/tcping, unit is second,must large than or equal 5, less than 86400 and timeout_seconds, default is 60"`
-	ICMPConfigs     []ICMPConfig `json:"icmp" comment:"the icmping config list, example:  {\"src\" : \"${IP_ADDR}\",  \"target\" : \"${REMOTE_HOST}\", \"count\" : 3}"`
-	TCPConfigs      []TCPConfig  `json:"tcp" comment:"the tcping config list, example: {\"src\" : \"${IP_ADDR}\",  \"target\" : \"${REMOTE_HOST}\", \"port\" : ${PORT}, \"count\" : 3}"`
-	HTTPConfigs     []HTTPConfig `json:"http" comment:"the http config list, example: {\"src\" : \"${IP_ADDR}\",  \"target\" : \"${http url}\"}"`
+	timeout        time.Duration
+	icmpPrivileged bool
+	hasConfig      bool
+	resultChannel  chan *Result
+	context        pipeline.Context
+	hostname       string
+	ip             string
+	resolveHostMap *sync.Map
+	resolveChannel chan *ResolveResult
+
+	DisableDNS       bool         `json:"disable_dns_metric" comment:"disable dns resolve metric, default is false"`
+	TimeoutSeconds   int          `json:"timeout_seconds" comment:"the timeout of ping/tcping, unit is second,must large than or equal 1, less than  30, default is 5"`
+	IntervalSeconds  int          `json:"interval_seconds" comment:"the interval of ping/tcping, unit is second,must large than or equal 5, less than 86400 and timeout_seconds, default is 60"`
+	ICMPConfigs      []ICMPConfig `json:"icmp" comment:"the icmping config list, example:  {\"src\" : \"${IP_ADDR}\",  \"target\" : \"${REMOTE_HOST}\", \"count\" : 3}"`
+	TCPConfigs       []TCPConfig  `json:"tcp" comment:"the tcping config list, example: {\"src\" : \"${IP_ADDR}\",  \"target\" : \"${REMOTE_HOST}\", \"port\" : ${PORT}, \"count\" : 3}"`
+	HTTPConfigs      []HTTPConfig `json:"http" comment:"the http config list, example: {\"src\" : \"${IP_ADDR}\",  \"target\" : \"${http url}\"}"`
+	LocalTriggerMode bool         `json:"local_trigger_mode" comment:"use local node as trigger node when not found source node in previous configs"`
 }
 
 func (m *NetPing) processTimeoutAndInterval() {
@@ -143,7 +145,7 @@ func (m *NetPing) processTimeoutAndInterval() {
 	}
 }
 
-func (m *NetPing) Init(context ilogtail.Context) (int, error) {
+func (m *NetPing) Init(context pipeline.Context) (int, error) {
 	logger.Info(context.GetRuntimeContext(), "netping init")
 	m.context = context
 
@@ -160,6 +162,9 @@ func (m *NetPing) Init(context ilogtail.Context) (int, error) {
 	m.resolveHostMap = &sync.Map{}
 
 	for _, c := range m.ICMPConfigs {
+		if c.Src == "" && m.LocalTriggerMode {
+			c.Src = m.ip
+		}
 		if c.Src == m.ip {
 			if c.Name == "" {
 				c.Name = fmt.Sprintf("%s -> %s", c.Src, c.Target)
@@ -177,6 +182,9 @@ func (m *NetPing) Init(context ilogtail.Context) (int, error) {
 	// get tcp target
 	localTCPConfigs := make([]TCPConfig, 0)
 	for _, c := range m.TCPConfigs {
+		if c.Src == "" && m.LocalTriggerMode {
+			c.Src = m.ip
+		}
 		if c.Src == m.ip {
 			if c.Name == "" {
 				c.Name = fmt.Sprintf("%s -> %s:%d", c.Src, c.Target, c.Port)
@@ -194,6 +202,9 @@ func (m *NetPing) Init(context ilogtail.Context) (int, error) {
 	// get http target
 	localHTTPConfigs := make([]HTTPConfig, 0)
 	for _, c := range m.HTTPConfigs {
+		if c.Src == "" && m.LocalTriggerMode {
+			c.Src = m.ip
+		}
 		if c.Src == m.ip {
 			if !strings.HasPrefix(c.Target, "http") {
 				// add default schema
@@ -249,7 +260,7 @@ func (m *NetPing) Description() string {
 }
 
 // Collect is called every trigger interval to collect the metrics and send them to the collector.
-func (m *NetPing) Collect(collector ilogtail.Collector) error {
+func (m *NetPing) Collect(collector pipeline.Collector) error {
 	if !m.hasConfig {
 		return nil
 	}
@@ -667,7 +678,7 @@ func (m *NetPing) doHTTPing(config *HTTPConfig) {
 
 // Register the plugin to the MetricInputs array.
 func init() {
-	ilogtail.MetricInputs["metric_input_netping"] = func() ilogtail.MetricInput {
+	pipeline.MetricInputs["metric_input_netping"] = func() pipeline.MetricInput {
 		return &NetPing{
 			// here you could set default value.
 		}

@@ -25,7 +25,6 @@
 #include <execinfo.h>
 #elif defined(_MSC_VER)
 #include <Rpc.h>
-#include "WinUuid.h"
 #endif
 #include "logger/Logger.h"
 #include "StringTools.h"
@@ -60,6 +59,13 @@ std::string CalculateRandomUUID() {
     RpcStringFree(&str);
     return s;
 #endif
+}
+
+bool IsHttpsEndpoint(const string& endpoint) {
+    if (endpoint.find("https://") == 0) {
+        return true;
+    }
+    return false;
 }
 
 namespace util {

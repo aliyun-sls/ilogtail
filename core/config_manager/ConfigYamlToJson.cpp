@@ -24,6 +24,7 @@ const std::string PLUGIN_CATEGORY_INPUTS = "inputs";
 const std::string PLUGIN_CATEGORY_PROCESSORS = "processors";
 const std::string PLUGIN_CATEGORY_AGGREGATORS = "aggregators";
 const std::string PLUGIN_CATEGORY_FLUSHERS = "flushers";
+const std::string PLUGIN_CATEGORY_EXTENSIONS = "extensions";
 
 const std::string INPUT_FILE_LOG = "file_log";
 
@@ -224,9 +225,17 @@ bool ConfigYamlToJson::GenerateLocalJsonConfig(const string configName,
                 configName, workMode, PLUGIN_CATEGORY_FLUSHERS, yamlConfig, pluginJsonConfig, userJsonConfig)) {
             return false;
         }
+        if (!GenerateLocalJsonConfigForPluginCategory(
+                configName, workMode, PLUGIN_CATEGORY_EXTENSIONS, yamlConfig, pluginJsonConfig, userJsonConfig)) {
+            return false;
+        }
 
         FillupDefaultUserJsonConfig(workMode, userJsonConfig);
         if (!pluginJsonConfig.empty()) {
+            if (yamlConfig["version"])
+                pluginJsonConfig["version"] = yamlConfig["version"].as<std::string>();
+            else
+                pluginJsonConfig["version"] = "v1";
             userJsonConfig["plugin"] = pluginJsonConfig;
         }
         userJsonConfig["log_type"] = workMode.mLogType;

@@ -76,6 +76,7 @@ namespace sdk {
     const char* const MACHINES = "/machines";
     const char* const MACHINEGROUPS = "/machinegroups";
     const char* const ACLS = "/acls";
+    const char* const CONFIGSERVERAGENT = "/Agent";
 
     const char* const HTTP_GET = "GET";
     const char* const HTTP_POST = "POST";
@@ -135,6 +136,13 @@ namespace sdk {
     const char* const LOG_SHARD_STATUS_READWRITE = "readwrite";
     const char* const LOG_SHARD_STATUS_READONLY = "readonly";
 
+    bool caseInsensitiveComp(const char lhs, const char rhs) {
+        return tolower(lhs) < tolower(rhs);
+    }
+
+    bool compareHeader(const std::string& lhs, const std::string& rhs) {
+        return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), caseInsensitiveComp);
+    }
 
     bool HttpMessage::IsLogServiceResponse() const {
         if (!AppConfig::GetInstance()->IsResponseVerificationEnabled()) {

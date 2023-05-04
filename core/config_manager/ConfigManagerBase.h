@@ -56,12 +56,34 @@ class EventDispatcher;
 class EventHandler;
 struct LogFilterRule;
 
+template<class T>
+class DoubleBuffer {
+public:
+    DoubleBuffer() : currentBuffer(0) {}
+
+    T& getWriteBuffer() {
+        return buffers[currentBuffer];
+    }
+
+    T& getReadBuffer() {
+        return buffers[1 - currentBuffer];
+    }
+
+    void swap() {
+        currentBuffer = 1 - currentBuffer;
+    }
+private:
+    T buffers[2];
+    int currentBuffer;
+};
+
 class ConfigManagerBase {
 protected:
     int32_t mStartTime;
 
     Json::Value mConfigJson;
     Json::Value mLocalConfigJson;
+    Json::Value mFileTagsJson;
     std::unordered_map<std::string, Json::Value> mLocalConfigDirMap;
     std::unordered_map<std::string, YAML::Node> mYamlConfigDirMap;
 
@@ -153,6 +175,9 @@ protected:
     mutable PTMutex mCollectionMarkLock;
 
     bool mHaveFuseConfigFlag = false;
+
+    PTMutex mRegionAliuidMapLock;
+    std::map<std::string, std::set<std::string>> mRegionAliuidMap;
 
     /**
      * @brief CreateCustomizedFuseConfig, call this after starting, insert it into config map
@@ -439,6 +464,16 @@ public:
 
     virtual Json::Value& CheckPluginProcessor(Json::Value& pluginConfigJson, const Json::Value& rootConfigJson) = 0;
 
+    std::vector<sls_logs::LogTag>& GetFileTags() {
+        return mFileTags.getReadBuffer();
+    }
+
+    void UpdateFileTags();
+
+    const std::set<std::string>& GetRegionAliuids(const std::string& region);
+    void InsertRegionAliuidMap(const std::string& region, const std::string& aliuid);
+    void ClearRegionAliuidMap();
+
 private:
     // no copy
     ConfigManagerBase(const ConfigManagerBase&);
@@ -483,7 +518,8 @@ private:
     bool CheckYamlDirConfigUpdate(const std::string& configDirPath,
                                   bool isRemote,
                                   std::vector<std::string>& filepathes,
-                                  std::unordered_map<std::string, int64_t>& yamlConfigMTimeMap);
+                                  std::unordered_map<std::string, int64_t>& yamlConfigMTimeMap,
+                                  bool createIfNotExist);
 
     /**
      * @brief Load a single data collection config and insert it into mNameConfigMap with name @name.
@@ -504,6 +540,8 @@ private:
     void InsertProject(const std::string& project);
 
     void ClearProjects();
+
+    class DoubleBuffer <std::vector<sls_logs::LogTag>>mFileTags;
 
 #ifdef APSARA_UNIT_TEST_MAIN
     void CleanEnviroments();

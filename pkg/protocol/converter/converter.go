@@ -17,26 +17,33 @@ package protocol
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/alibaba/ilogtail/pkg/flags"
+	"github.com/alibaba/ilogtail/pkg/models"
 	"github.com/alibaba/ilogtail/pkg/protocol"
 )
 
 const (
 	ProtocolCustomSingle = "custom_single"
-	ProtocolOtlpLogV1    = "otlp_log_v1"
+	ProtocolOtlpV1       = "otlp_v1"
+	ProtocolInfluxdb     = "influxdb"
+	ProtocolRaw          = "raw"
 )
 
 const (
 	EncodingNone     = "none"
 	EncodingJSON     = "json"
 	EncodingProtobuf = "protobuf"
+	EncodingCustom   = "custom"
 )
 
 const (
 	tagPrefix           = "__tag__:"
 	targetContentPrefix = "content."
 	targetTagPrefix     = "tag."
+
+	targetGroupMetadataPrefix = "metadata."
 )
 
 const (
@@ -57,6 +64,14 @@ const (
 	tagK8sContainerIP        = "k8s.container.ip"
 	tagK8sContainerImageName = "k8s.container.image.name"
 )
+
+// todo: make multiple pools for different size levels
+var byteBufPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 0, 1024)
+		return &buf
+	},
+}
 
 var tagConversionMap = map[string]string{
 	"__path__":         tagLogFilePath,
@@ -84,16 +99,34 @@ var supportedEncodingMap = map[string]map[string]bool{
 		EncodingJSON:     true,
 		EncodingProtobuf: false,
 	},
-	ProtocolOtlpLogV1: {
+	ProtocolOtlpV1: {
 		EncodingNone: true,
+	},
+	ProtocolInfluxdb: {
+		EncodingCustom: true,
+	},
+	ProtocolRaw: {
+		EncodingCustom: true,
 	},
 }
 
 type Converter struct {
 	Protocol             string
 	Encoding             string
+	Separator            string
+	IgnoreUnExpectedData bool
 	TagKeyRenameMap      map[string]string
 	ProtocolKeyRenameMap map[string]string
+}
+
+func NewConverterWithSep(protocol, encoding, sep string, ignoreUnExpectedData bool, tagKeyRenameMap, protocolKeyRenameMap map[string]string) (*Converter, error) {
+	converter, err := NewConverter(protocol, encoding, tagKeyRenameMap, protocolKeyRenameMap)
+	if err != nil {
+		return nil, err
+	}
+	converter.Separator = sep
+	converter.IgnoreUnExpectedData = ignoreUnExpectedData
+	return converter, nil
 }
 
 func NewConverter(protocol, encoding string, tagKeyRenameMap, protocolKeyRenameMap map[string]string) (*Converter, error) {
@@ -121,8 +154,8 @@ func (c *Converter) DoWithSelectedFields(logGroup *protocol.LogGroup, targetFiel
 	switch c.Protocol {
 	case ProtocolCustomSingle:
 		return c.ConvertToSingleProtocolLogs(logGroup, targetFields)
-	case ProtocolOtlpLogV1:
-		return c.ConvertToOtlpLogsV1(logGroup, targetFields)
+	case ProtocolOtlpV1:
+		return c.ConvertToOtlpResourseLogs(logGroup, targetFields)
 	default:
 		return nil, nil, fmt.Errorf("unsupported protocol: %s", c.Protocol)
 	}
@@ -137,8 +170,41 @@ func (c *Converter) ToByteStreamWithSelectedFields(logGroup *protocol.LogGroup, 
 	switch c.Protocol {
 	case ProtocolCustomSingle:
 		return c.ConvertToSingleProtocolStream(logGroup, targetFields)
+	case ProtocolInfluxdb:
+		return c.ConvertToInfluxdbProtocolStream(logGroup, targetFields)
 	default:
 		return nil, nil, fmt.Errorf("unsupported protocol: %s", c.Protocol)
+	}
+}
+
+func (c *Converter) ToByteStreamWithSelectedFieldsV2(groupEvents *models.PipelineGroupEvents, targetFields []string) (stream interface{}, values []map[string]string, err error) {
+	switch c.Protocol {
+	case ProtocolRaw:
+		return c.ConvertToRawStream(groupEvents, targetFields)
+	case ProtocolInfluxdb:
+		return c.ConvertToInfluxdbProtocolStreamV2(groupEvents, targetFields)
+	default:
+		return nil, nil, fmt.Errorf("unsupported protocol: %s", c.Protocol)
+	}
+}
+
+func GetPooledByteBuf() *[]byte {
+	return byteBufPool.Get().(*[]byte)
+}
+
+func PutPooledByteBuf(buf *[]byte) {
+	*buf = (*buf)[:0]
+	byteBufPool.Put(buf)
+}
+
+func TrimPrefix(str string) string {
+	switch {
+	case strings.HasPrefix(str, targetContentPrefix):
+		return strings.TrimPrefix(str, targetContentPrefix)
+	case strings.HasPrefix(str, targetTagPrefix):
+		return strings.TrimPrefix(str, targetTagPrefix)
+	default:
+		return str
 	}
 }
 
@@ -147,7 +213,7 @@ func convertLogToMap(log *protocol.Log, logTags []*protocol.LogTag, src, topic s
 	for _, logContent := range log.Contents {
 		switch logContent.Key {
 		case "__log_topic__":
-			tags[tagLogTopic] = logContent.Value
+			addTagIfRequired(tags, tagKeyRenameMap, tagLogTopic, logContent.Value)
 		case tagPrefix + "__user_defined_id__":
 			continue
 		default:
@@ -167,11 +233,7 @@ func convertLogToMap(log *protocol.Log, logTags []*protocol.LogTag, src, topic s
 				}
 			}
 			if len(tagName) != 0 {
-				if newTagName, ok := tagKeyRenameMap[tagName]; ok && len(newTagName) != 0 {
-					tags[newTagName] = logContent.Value
-				} else if !ok {
-					tags[tagName] = logContent.Value
-				}
+				addTagIfRequired(tags, tagKeyRenameMap, tagName, logContent.Value)
 			} else {
 				contents[logContent.Key] = logContent.Value
 			}
@@ -189,16 +251,12 @@ func convertLogToMap(log *protocol.Log, logTags []*protocol.LogTag, src, topic s
 		} else if _, ok := tagConversionMap[logTag.Key]; ok {
 			tagName = tagConversionMap[logTag.Key]
 		}
-		if newTagName, ok := tagKeyRenameMap[tagName]; ok && len(newTagName) != 0 {
-			tags[newTagName] = logTag.Value
-		} else if !ok {
-			tags[tagName] = logTag.Value
-		}
+		addTagIfRequired(tags, tagKeyRenameMap, tagName, logTag.Value)
 	}
 
-	tags[tagHostIP] = src
+	addTagIfRequired(tags, tagKeyRenameMap, tagHostIP, src)
 	if topic != "" {
-		tags[tagLogTopic] = topic
+		addTagIfRequired(tags, tagKeyRenameMap, tagLogTopic, topic)
 	}
 
 	return contents, tags
@@ -227,4 +285,12 @@ func findTargetValues(targetFields []string, contents, tags, tagKeyRenameMap map
 		}
 	}
 	return desiredValue, nil
+}
+
+func addTagIfRequired(tags, tagKeyRenameMap map[string]string, key, value string) {
+	if newKey, ok := tagKeyRenameMap[key]; ok && len(newKey) != 0 {
+		tags[newKey] = value
+	} else if !ok {
+		tags[key] = value
+	}
 }

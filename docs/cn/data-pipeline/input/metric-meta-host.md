@@ -4,16 +4,20 @@
 
 `metric_meta_host` `input`插件用于采集主机的Meta信息（例如CPU型号、内存大小、进程等）。
 
+## 版本
+
+[Stable](../stability-level.md)
+
 ## 配置参数
 
 | 参数          | 类型      | 是否必选 | 说明                                                                                         |
 | ----------- | ------- | ---- | ------------------------------------------------------------------------------------------ |
 | Type        | String  | 是    | 插件类型                                                                                       |
-| CPU     | Boolean  | 否    | <p>是否开启主机CPU采集。</p><p>默认取值：是。</p> |
-| Memory | Boolean  | 否   | <p>是否开启主机Memory采集。</p><p>默认取值：是。</p> |
-| Net    | Boolean | 否    | <p>是否开启主机Net采集。</p><p>默认取值：否。</p> |
-| Disk    | Boolean | 否    | <p>是否开启主机Disk采集。</p><p>默认取值：否。</p> |
-| Process  | Boolean | 否    | <p>是否开启主机Process采集。</p><p>默认取值：否。</p>件。                                                                               |
+| CPU     | Boolean  | 否    | <p>是否开启主机CPU采集。</p><p>默认取值：true。</p> |
+| Memory | Boolean  | 否   | <p>是否开启主机Memory采集。</p><p>默认取值：true。</p> |
+| Net    | Boolean | 否    | <p>是否开启主机Net采集。</p><p>默认取值：false。</p> |
+| Disk    | Boolean | 否    | <p>是否开启主机Disk采集。</p><p>默认取值：false。</p> |
+| Process  | Boolean | 否    | <p>是否开启主机Process采集。</p><p>默认取值：false。</p>件。                                                                               |
 | ProcessNamesRegex  | String数组 | 否    | 进程名过滤规则，支持正则匹配。件。                                                                               |
 | Labels  | String字典 | 否    | 自定义Labels。件。                                                                               |
 | ProcessIntervalRound  | Integer | 否    | <p>Process采集间隔。</p><p>默认取值：5s。</p> |
@@ -22,9 +26,9 @@
 
 采集主机上CPU、Memory、Net、Disk、Process等Meta信息。
 
-#### 采集配置
+### 采集配置
 
-```
+```yaml
 enable: true
 inputs:
   - Type: metric_meta_host
@@ -46,8 +50,10 @@ flushers:
 ```
 
 #### 输出
+
 * 主机Meta信息
-```
+
+```json
 {
     "__time__": 1658364854,
     "type": "HOST",
@@ -60,8 +66,9 @@ flushers:
 }
 ```
 
-* 进程Meta信息 
-```
+* 进程Meta信息
+
+```json
 {
     "__time__": 1658364348,
     "type": "PROCESS",

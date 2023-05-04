@@ -16,18 +16,18 @@ package skywalkingv2_5
 
 import (
 	"context"
+	"github.com/alibaba/ilogtail/pkg/pipeline"
 	"io"
 	"runtime"
 
-	"github.com/alibaba/ilogtail"
 	"github.com/alibaba/ilogtail/pkg/logger"
 	v3 "github.com/alibaba/ilogtail/plugins/input/skywalkingv2_5/skywalking/network/common/v2_5"
 	skywalking "github.com/alibaba/ilogtail/plugins/input/skywalkingv2_5/skywalking/network/language/agent/v2_5"
 )
 
 type TracingHandler struct {
-	context                      ilogtail.Context
-	collector                    ilogtail.Collector
+	context                      pipeline.Context
+	collector                    pipeline.Collector
 	cache                        *ResourcePropertiesCache
 	compIDMessagingSystemMapping map[int32]string
 }

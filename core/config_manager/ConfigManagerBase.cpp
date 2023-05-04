@@ -55,6 +55,7 @@
 #include "sender/Sender.h"
 #include "processor/LogProcess.h"
 #include "processor/LogFilter.h"
+#include "ConfigManagerBase.h"
 
 using namespace std;
 using namespace logtail;
@@ -104,6 +105,8 @@ DECLARE_FLAG_BOOL(default_global_fuse_mode);
 DECLARE_FLAG_BOOL(default_global_mark_offset_flag);
 DECLARE_FLAG_BOOL(enable_collection_mark);
 DECLARE_FLAG_BOOL(enable_env_ref_in_config);
+
+DEFINE_FLAG_STRING(ALIYUN_LOG_FILE_TAGS, "default env file key to load tags", "");
 
 namespace logtail {
 
@@ -228,6 +231,7 @@ void ConfigManagerBase::MappingPluginConfig(const Json::Value& configValue, Conf
         detail["LogPath"] = Json::Value(config->mBasePath);
         detail["MaxDepth"] = Json::Value(config->mMaxDepth);
     }
+    detail["FileParttern"] = Json::Value(config->mFilePattern);
     if (configValue.isMember("docker_include_label") && configValue["docker_include_label"].isObject()) {
         detail["IncludeLabel"] = configValue["docker_include_label"];
     }
@@ -239,6 +243,10 @@ void ConfigManagerBase::MappingPluginConfig(const Json::Value& configValue, Conf
     }
     if (configValue.isMember("docker_exclude_env") && configValue["docker_exclude_env"].isObject()) {
         detail["ExcludeEnv"] = configValue["docker_exclude_env"];
+    }
+    if (configValue.isMember("advanced") && configValue["advanced"].isObject()
+        && configValue["advanced"].isMember("collect_containers_flag")) {
+        detail["CollectContainersFlag"] = configValue["advanced"]["collect_containers_flag"];
     }
     // parse k8s flags
     if (configValue.isMember("advanced") && configValue["advanced"].isObject()
@@ -669,6 +677,8 @@ void ConfigManagerBase::LoadSingleUserConfig(const std::string& logName, const J
                     config->mUnAcceptDirPattern = GetStringVector(value["dir_pattern_black_list"]);
                 }
 
+                // TODO: the following codes (line 673 - line 724) seem to be the same as the codes in line 816 - line
+                // 874. Remove the following codes in the future.
                 if (value.isMember("merge_type") && value["merge_type"].isString()) {
                     string mergeType = value["merge_type"].asString();
 
@@ -828,17 +838,35 @@ void ConfigManagerBase::LoadSingleUserConfig(const std::string& logName, const J
                 string logTZ = value["log_tz"].asString();
                 int logTZSecond = 0;
                 bool adjustFlag = value["tz_adjust"].asBool();
-                if (adjustFlag && !ParseTimeZoneOffsetSecond(logTZ, logTZSecond)) {
-                    LOG_ERROR(sLogger, ("invalid log time zone set", logTZ));
-                    config->mTimeZoneAdjust = false;
+                if (adjustFlag) {
+                    if (config->mTimeFormat.empty()) {
+                        LOG_WARNING(sLogger,
+                                    ("choose to adjust log time zone, but time format is not specified",
+                                     "use system time as log time instead")("project", config->mProjectName)(
+                                        "logstore", config->mCategory)("config", config->mConfigName));
+                        config->mTimeZoneAdjust = false;
+                    } else if ((logType == DELIMITER_LOG || logType == JSON_LOG) && config->mTimeKey.empty()) {
+                        LOG_WARNING(sLogger,
+                                    ("choose to adjust log time zone, but time key is not specified",
+                                     "use system time as log time instead")("project", config->mProjectName)(
+                                        "logstore", config->mCategory)("config", config->mConfigName));
+                        config->mTimeZoneAdjust = false;
+                    } else if (!ParseTimeZoneOffsetSecond(logTZ, logTZSecond)) {
+                        LOG_WARNING(sLogger,
+                                    ("invalid log time zone specified, will parse log time without time zone adjusted",
+                                     logTZ)("project", config->mProjectName)("logstore", config->mCategory)(
+                                        "config", config->mConfigName));
+                        config->mTimeZoneAdjust = false;
+                    } else {
+                        config->mTimeZoneAdjust = adjustFlag;
+                        config->mLogTimeZoneOffsetSecond = logTZSecond;
+                        LOG_INFO(sLogger,
+                                 ("set log time zone", logTZ)("project", config->mProjectName)(
+                                     "logstore", config->mCategory)("config", config->mConfigName));
+                    }
                 } else {
                     config->mTimeZoneAdjust = adjustFlag;
                     config->mLogTimeZoneOffsetSecond = logTZSecond;
-                    if (adjustFlag) {
-                        LOG_INFO(sLogger,
-                                 ("set log timezone adjust, project", config->mProjectName)(
-                                     "logstore", config->mCategory)("time zone", logTZ)("offset seconds", logTZSecond));
-                    }
                 }
             }
 
@@ -897,6 +925,7 @@ void ConfigManagerBase::LoadSingleUserConfig(const std::string& logName, const J
                     }
                 }
             }
+            InsertRegionAliuidMap(config->mRegion, config->mAliuid);
 
             config->mShardHashKey.clear();
             if (value.isMember("shard_hash_key")) {
@@ -1800,6 +1829,7 @@ void ConfigManagerBase::RemoveAllConfigs() {
     mCacheFileAllConfigMap.clear();
     ClearProjects();
     ClearRegions();
+    ClearRegionAliuidMap();
 }
 
 std::string ConfigManagerBase::GetDefaultPubAliuid() {
@@ -2304,6 +2334,42 @@ bool ConfigManagerBase::GetLocalConfigFileUpdate() {
     return updateFlag;
 }
 
+void ConfigManagerBase::UpdateFileTags() {
+    if (STRING_FLAG(ALIYUN_LOG_FILE_TAGS).empty()) {
+        return;
+    }
+    // read local config
+    Json::Value localFileTagsJson;
+    const char* file_tags_dir = STRING_FLAG(ALIYUN_LOG_FILE_TAGS).c_str();
+    ParseConfResult userLogRes = ParseConfig(file_tags_dir, localFileTagsJson);
+    if (userLogRes != CONFIG_OK) {
+        if (userLogRes == CONFIG_NOT_EXIST)
+            LOG_ERROR(sLogger, ("load file tags fail, file not exist", file_tags_dir));
+        else if (userLogRes == CONFIG_INVALID_FORMAT) {
+            LOG_ERROR(sLogger, ("load file tags fail, file content is not valid json", file_tags_dir));
+        }
+    } else {
+        if (localFileTagsJson != mFileTagsJson) {
+            int32_t i = 0;
+            vector<sls_logs::LogTag>& sFileTags = mFileTags.getWriteBuffer();
+            sFileTags.clear();
+            sFileTags.resize(localFileTagsJson.size());
+            for (auto it = localFileTagsJson.begin(); it != localFileTagsJson.end(); ++it) {
+                if (it->isString()) {
+                    sFileTags[i].set_key(it.key().asString());
+                    sFileTags[i].set_value(it->asString());
+                    ++i;
+                }
+            }
+            mFileTags.swap();
+            LOG_INFO(sLogger, ("local file tags update, old config", mFileTagsJson.toStyledString()));
+            mFileTagsJson = localFileTagsJson;
+            LOG_INFO(sLogger, ("local file tags update, new config", mFileTagsJson.toStyledString()));
+        }
+    }
+    return;
+}
+
 bool ConfigManagerBase::GetLocalConfigDirUpdate() {
     bool updateFlag = false;
     // list dir
@@ -2377,11 +2443,9 @@ bool ConfigManagerBase::GetYamlConfigDirUpdate() {
     std::vector<std::string> filepathes;
     std::unordered_map<std::string, int64_t> yamlConfigMTimeMap;
     static std::string localConfigDirPath = AppConfig::GetInstance()->GetLocalUserYamlConfigDirPath();
-    updateFlag |= CheckYamlDirConfigUpdate(localConfigDirPath, false, filepathes, yamlConfigMTimeMap);
-    // TODO: Change serverConfigDirPath to be parallel to localConfigDirPath. Futhermore, create serverConfigDirPath
-    // only when config server is connected.
-    // static std::string serverConfigDirPath = localConfigDirPath + "remote_config" + PATH_SEPARATOR;
-    // updateFlag |= CheckYamlDirConfigUpdate(serverConfigDirPath, true, filepathes, yamlConfigMTimeMap);
+    updateFlag |= CheckYamlDirConfigUpdate(localConfigDirPath, false, filepathes, yamlConfigMTimeMap, true);
+    static std::string serverConfigDirPath = AppConfig::GetInstance()->GetRemoteUserYamlConfigDirPath();
+    updateFlag |= CheckYamlDirConfigUpdate(serverConfigDirPath, true, filepathes, yamlConfigMTimeMap, false);
 
     if (mYamlConfigMTimeMap.size() != yamlConfigMTimeMap.size()) {
         updateFlag = true;
@@ -2418,7 +2482,8 @@ bool ConfigManagerBase::GetYamlConfigDirUpdate() {
 bool ConfigManagerBase::CheckYamlDirConfigUpdate(const std::string& configDirPath,
                                                  bool isRemote,
                                                  std::vector<std::string>& filepathes,
-                                                 std::unordered_map<std::string, int64_t>& yamlConfigMTimeMap) {
+                                                 std::unordered_map<std::string, int64_t>& yamlConfigMTimeMap,
+                                                 bool createIfNotExist) {
     bool updateFlag = false;
     fsutil::Dir configDir(configDirPath);
     if (!configDir.Open()) {
@@ -2426,7 +2491,7 @@ bool ConfigManagerBase::CheckYamlDirConfigUpdate(const std::string& configDirPat
         if (fsutil::Dir::IsEACCES(savedErrno) || fsutil::Dir::IsENOTDIR(savedErrno)
             || fsutil::Dir::IsENOENT(savedErrno)) {
             LOG_DEBUG(sLogger, ("invalid yaml conf dir", configDirPath)("error", ErrnoToString(savedErrno)));
-            if (!Mkdir(configDirPath.c_str())) {
+            if (createIfNotExist && !Mkdir(configDirPath.c_str())) {
                 savedErrno = errno;
                 if (!IsEEXIST(savedErrno)) {
                     LOG_ERROR(sLogger, ("create conf yaml dir failed", configDirPath)("error", strerror(savedErrno)));
@@ -3005,6 +3070,21 @@ std::string replaceEnvVarRefInStr(const std::string& inStr) {
     }
     outStr.append(unescapeDollar(lastMatchEnd, inStr.end())); // original part
     return outStr;
+}
+
+const set<string>& ConfigManagerBase::GetRegionAliuids(const std::string& region) {
+    PTScopedLock lock(mRegionAliuidMapLock);
+    return mRegionAliuidMap[region];
+}
+
+void ConfigManagerBase::InsertRegionAliuidMap(const std::string& region, const std::string& aliuid) {
+    PTScopedLock lock(mRegionAliuidMapLock);
+    mRegionAliuidMap[region].insert(aliuid);
+}
+
+void ConfigManagerBase::ClearRegionAliuidMap() {
+    PTScopedLock lock(mRegionAliuidMapLock);
+    mRegionAliuidMap.clear();
 }
 
 } // namespace logtail

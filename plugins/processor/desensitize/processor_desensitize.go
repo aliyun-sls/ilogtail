@@ -21,8 +21,8 @@ import (
 
 	"github.com/dlclark/regexp2"
 
-	"github.com/alibaba/ilogtail"
 	"github.com/alibaba/ilogtail/pkg/logger"
+	"github.com/alibaba/ilogtail/pkg/pipeline"
 	"github.com/alibaba/ilogtail/pkg/protocol"
 )
 
@@ -34,7 +34,7 @@ type ProcessorDesensitize struct {
 	RegexBegin    string
 	RegexContent  string
 
-	context      ilogtail.Context
+	context      pipeline.Context
 	regexBegin   *regexp2.Regexp
 	regexContent *regexp2.Regexp
 }
@@ -42,7 +42,7 @@ type ProcessorDesensitize struct {
 const pluginName = "processor_desensitize"
 
 // Init called for init some system resources, like socket, mutex...
-func (p *ProcessorDesensitize) Init(context ilogtail.Context) error {
+func (p *ProcessorDesensitize) Init(context pipeline.Context) error {
 	p.context = context
 
 	var err error
@@ -134,29 +134,34 @@ func (p *ProcessorDesensitize) desensitize(val string) string {
 	}
 
 	var pos = 0
-	match, _ := p.regexBegin.FindStringMatchStartingAt(val, pos)
+	runeVal := []rune(val)
+	match, _ := p.regexBegin.FindRunesMatchStartingAt(runeVal, pos)
 	for match != nil {
 		pos = match.Index + match.Length
-		content, _ := p.regexContent.FindStringMatchStartingAt(val, pos)
+		content, _ := p.regexContent.FindRunesMatchStartingAt(runeVal, pos)
 		if content != nil {
 			if p.Method == "const" {
-				val, _ = p.regexContent.Replace(val, p.ReplaceString, pos, 1)
-				pos = content.Index + len(p.ReplaceString)
+				curPos := len(string(runeVal[:pos]))
+				val, _ = p.regexContent.Replace(val, p.ReplaceString, curPos, 1)
+				runeVal = []rune(val)
+				pos = content.Index + len([]rune(p.ReplaceString))
 			}
 			if p.Method == "md5" {
 				has := md5.Sum([]byte(content.String())) //nolint:gosec
 				md5str := fmt.Sprintf("%x", has)
-				val, _ = p.regexContent.Replace(val, md5str, pos, 1)
-				pos = content.Index + len(md5str)
+				curPos := len(string(runeVal[:pos]))
+				val, _ = p.regexContent.Replace(val, md5str, curPos, 1)
+				runeVal = []rune(val)
+				pos = content.Index + len([]rune(md5str))
 			}
 		}
-		match, _ = p.regexBegin.FindStringMatchStartingAt(val, pos)
+		match, _ = p.regexBegin.FindRunesMatchStartingAt(runeVal, pos)
 	}
 	return val
 }
 
 func init() {
-	ilogtail.Processors[pluginName] = func() ilogtail.Processor {
+	pipeline.Processors[pluginName] = func() pipeline.Processor {
 		return &ProcessorDesensitize{
 			SourceKey:     "",
 			Method:        "const",

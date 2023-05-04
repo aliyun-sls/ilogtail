@@ -30,6 +30,7 @@ using namespace sls_logs;
 DECLARE_FLAG_INT32(merge_log_count_limit);
 DECLARE_FLAG_INT32(same_topic_merge_send_count);
 DECLARE_FLAG_INT32(max_send_log_group_size);
+DECLARE_FLAG_STRING(ALIYUN_LOG_FILE_TAGS);
 
 namespace logtail {
 
@@ -147,6 +148,18 @@ bool Aggregator::Add(const std::string& projectName,
             logTagPtr->set_value(sEnvTags[i].value());
         }
     }
+
+    if (!STRING_FLAG(ALIYUN_LOG_FILE_TAGS).empty()) {
+        vector<sls_logs::LogTag>& sFileTags = ConfigManager::GetInstance()->GetFileTags();
+        if (!sFileTags.empty()) {
+            for (size_t i = 0; i < sFileTags.size(); ++i) {
+                sls_logs::LogTag* logTagPtr = logGroup.add_logtags();
+                logTagPtr->set_key(sFileTags[i].key());
+                logTagPtr->set_value(sFileTags[i].value());
+            }
+        }
+    }
+
     vector<int32_t> neededLogs;
     int32_t neededLogSize = FilterNoneUtf8Metric(logGroup, config, neededLogs, context);
     if (neededLogSize == 0)
@@ -285,7 +298,7 @@ bool Aggregator::Add(const std::string& projectName,
                     itr->second = value;
                     initFlag = true;
 
-                    value->mLastUpdateTime = curTime;
+                    value->mLastUpdateTime = curTime; // set the last update time before enqueue
                     (value->mLogGroup).mutable_logs()->Reserve(INT32_FLAG(merge_log_count_limit));
                     (value->mLogGroup).set_category(category);
                     (value->mLogGroup).set_topic(topic);

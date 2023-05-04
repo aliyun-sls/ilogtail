@@ -15,17 +15,17 @@
 package skywalkingv2_5
 
 import (
-	"github.com/alibaba/ilogtail"
 	"github.com/alibaba/ilogtail/plugins/input/skywalkingv2_5/skywalking/network/language/agent/v2_5"
 	management "github.com/alibaba/ilogtail/plugins/input/skywalkingv2_5/skywalking/network/management/v2_5"
 	"net"
 
+	"github.com/alibaba/ilogtail/pkg/pipeline"
 	"google.golang.org/grpc"
 )
 
 type Input struct {
 	grpcServer       *grpc.Server
-	ctx              ilogtail.Context
+	ctx              pipeline.Context
 	MetricIntervalMs int64
 	Address          string
 	ComponentMapping map[int32]string
@@ -33,7 +33,7 @@ type Input struct {
 
 // Init called for init some system resources, like socket, mutex...
 // return interval(ms) and error flag, if interval is 0, use default interval
-func (r *Input) Init(ctx ilogtail.Context) (int, error) {
+func (r *Input) Init(ctx pipeline.Context) (int, error) {
 	r.ctx = ctx
 	r.grpcServer = grpc.NewServer()
 	return 0, nil
@@ -46,12 +46,12 @@ func (r *Input) Description() string {
 
 // Collect takes in an accumulator and adds the metrics that the Input
 // gathers. This is called every "interval"
-func (r *Input) Collect(ilogtail.Collector) error {
+func (r *Input) Collect(pipeline.Collector) error {
 	return nil
 }
 
 // Start starts the ServiceInput's service, whatever that may be
-func (r *Input) Start(collector ilogtail.Collector) error {
+func (r *Input) Start(collector pipeline.Collector) error {
 	resourcePropertiesCache := &ResourcePropertiesCache{
 		cache:    make(map[string]map[string]string),
 		cacheKey: r.ctx.GetConfigName() + "#" + CheckpointKey,
@@ -109,7 +109,7 @@ func (r *Input) Stop() error {
 	return nil
 }
 func init() {
-	ilogtail.ServiceInputs["service_skywalking_agent_v2_5"] = func() ilogtail.ServiceInput {
+	pipeline.ServiceInputs["service_skywalking_agent_v2_5"] = func() pipeline.ServiceInput {
 		return &Input{MetricIntervalMs: 10000}
 	}
 }
